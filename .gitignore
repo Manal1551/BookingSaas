@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Env files — NEVER commit real secrets. Only .env.example is tracked.
+.env
+**/.env
+.env.local
+**/.env.local
+!**/.env.example
+
+# Build output
+client/dist/
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Docker volume data (if bind-mounted locally)
+mongo-data/
