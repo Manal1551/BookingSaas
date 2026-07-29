@@ -1,0 +1,733 @@
+{
+  "info": {
+    "_postman_id": "8f3c1a52-6d44-4f0b-9d2e-7c0b5a1e2f10",
+    "name": "Booking SaaS — Bookings API (Week 2)",
+    "description": "Idempotent booking endpoints for the multi-tenant SaaS starter.\n\n## Setup\n1. Set the `baseUrl` variable to your tenant subdomain, e.g. `http://acme.lvh.me:5000`.\n2. Run **Auth → Login**. Postman stores the httpOnly cookies automatically and the test script also copies the access token into `{{token}}` for Bearer-style clients.\n3. Run the requests in **Bookings**.\n\n## Automatic variables\nA collection-level pre-request script runs before EVERY request and sets:\n- `{{idempotencyKey}}` — a fresh UUID v4\n- `{{startAt}}` / `{{endAt}}` — a grid-aligned 1-hour window ~24h in the future\n\nThat matters because the API rejects bookings in the past and requires start/end times aligned to a 5-minute boundary.\n\nSee `docs/API.md` for the full contract.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// A fresh Idempotency-Key for every send. Real clients generate ONE",
+          "// key per booking intent and reuse it across retries.",
+          "const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {",
+          "  const r = (Math.random() * 16) | 0;",
+          "  const v = c === 'x' ? r : ((r & 0x3) | 0x8);",
+          "  return v.toString(16);",
+          "});",
+          "pm.collectionVariables.set('idempotencyKey', uuid);",
+          "",
+          "// The API rejects past bookings and requires 5-minute grid alignment,",
+          "// so build a valid window ~24h ahead.",
+          "const start = new Date(Date.now() + 24 * 60 * 60 * 1000);",
+          "start.setUTCSeconds(0, 0);",
+          "start.setUTCMinutes(Math.ceil(start.getUTCMinutes() / 5) * 5);",
+          "pm.collectionVariables.set('startAt', start.toISOString());",
+          "pm.collectionVariables.set('endAt', new Date(start.getTime() + 60 * 60 * 1000).toISOString());"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://acme.lvh.me:5000", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    { "key": "bookingId", "value": "", "type": "string" },
+    { "key": "bookingVersion", "value": "0", "type": "string" },
+    { "key": "idempotencyKey", "value": "", "type": "string" },
+    { "key": "replayKey", "value": "", "type": "string" },
+    { "key": "startAt", "value": "", "type": "string" },
+    { "key": "endAt", "value": "", "type": "string" },
+    { "key": "resourceId", "value": "room-1", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('logged in', () => pm.response.to.have.status(200));",
+                  "// Copy the access token out of the cookie jar so scripts can use",
+                  "// Authorization: Bearer instead of cookies if they prefer.",
+                  "const jar = pm.cookies;",
+                  "if (jar.has('access_token')) {",
+                  "  pm.collectionVariables.set('token', jar.get('access_token'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@acme.test\",\n  \"password\": \"Password123!\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Seeded credentials from `npm run seed`. Sets httpOnly access/refresh cookies."
+          },
+          "response": []
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "me"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Bookings",
+      "item": [
+        {
+          "name": "List bookings",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings?page=1&limit=20&sort=startAt",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bookings"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "sort", "value": "startAt" },
+                { "key": "from", "value": "{{startAt}}", "disabled": true },
+                { "key": "to", "value": "{{endAt}}", "disabled": true },
+                { "key": "status", "value": "confirmed", "disabled": true },
+                { "key": "resourceId", "value": "{{resourceId}}", "disabled": true }
+              ]
+            },
+            "description": "Filters: `from`, `to`, `status`, `resourceId`. Paginated with `page`/`limit`, sorted with `sort`."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/bookings?page=1&limit=20",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "bookings"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "limit", "value": "20" }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                { "key": "Content-Type", "value": "application/json; charset=utf-8" },
+                { "key": "X-Request-Id", "value": "req_mdx8p2k1a3f9c7e2" }
+              ],
+              "cookie": [],
+              "body": "{\n  \"bookings\": [\n    {\n      \"id\": \"665f1c2a9b1e4d3f2a7c8b01\",\n      \"customerName\": \"Ada Lovelace\",\n      \"customerEmail\": \"ada@example.com\",\n      \"serviceName\": \"Design consultation\",\n      \"resourceId\": \"room-1\",\n      \"startAt\": \"2026-08-01T10:00:00.000Z\",\n      \"endAt\": \"2026-08-01T11:00:00.000Z\",\n      \"notes\": \"\",\n      \"status\": \"pending\",\n      \"version\": 0,\n      \"createdAt\": \"2026-07-27T09:12:44.001Z\",\n      \"updatedAt\": \"2026-07-27T09:12:44.001Z\"\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"total\": 1,\n  \"totalPages\": 1,\n  \"hasMore\": false\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create booking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json().booking;",
+                  "pm.collectionVariables.set('bookingId', b.id);",
+                  "pm.collectionVariables.set('bookingVersion', String(b.version));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}",
+                "description": "REQUIRED. UUID, generated per booking intent."
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Ada Lovelace\",\n  \"customerEmail\": \"ada@example.com\",\n  \"serviceName\": \"Design consultation\",\n  \"resourceId\": \"{{resourceId}}\",\n  \"startAt\": \"{{startAt}}\",\n  \"endAt\": \"{{endAt}}\",\n  \"notes\": \"\",\n  \"status\": \"pending\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bookings"]
+            },
+            "description": "Requires an `Idempotency-Key` UUID header. Saves `bookingId` and `bookingVersion` for the follow-up requests."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [{ "key": "Idempotency-Key", "value": "9f1d5a3e-4c2b-4a10-b7f8-2d6e0c1a9b44" }],
+                "body": { "mode": "raw", "raw": "{}" },
+                "url": { "raw": "{{baseUrl}}/api/bookings", "host": ["{{baseUrl}}"], "path": ["api", "bookings"] }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                { "key": "Content-Type", "value": "application/json; charset=utf-8" },
+                { "key": "X-Request-Id", "value": "req_mdx8p2k1a3f9c7e2" }
+              ],
+              "cookie": [],
+              "body": "{\n  \"booking\": {\n    \"id\": \"665f1c2a9b1e4d3f2a7c8b01\",\n    \"customerName\": \"Ada Lovelace\",\n    \"customerEmail\": \"ada@example.com\",\n    \"serviceName\": \"Design consultation\",\n    \"resourceId\": \"room-1\",\n    \"startAt\": \"2026-08-01T10:00:00.000Z\",\n    \"endAt\": \"2026-08-01T11:00:00.000Z\",\n    \"notes\": \"\",\n    \"status\": \"pending\",\n    \"version\": 0,\n    \"createdAt\": \"2026-07-27T09:12:44.001Z\",\n    \"updatedAt\": \"2026-07-27T09:12:44.001Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get booking by id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bookings", "{{bookingId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update booking (If-Match)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('updated', () => pm.response.to.have.status(200));",
+                  "// Keep the version fresh so a second PATCH does not 409.",
+                  "pm.collectionVariables.set('bookingVersion', String(pm.response.json().booking.version));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              {
+                "key": "If-Match",
+                "value": "{{bookingVersion}}",
+                "description": "Optimistic concurrency token. A `version` body field works too."
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"confirmed\",\n  \"notes\": \"Confirmed by phone\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bookings", "{{bookingId}}"]
+            },
+            "description": "Partial update. Send only the fields that changed, plus the version you loaded."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete booking (idempotent)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 No Content', () => pm.response.to.have.status(204));",
+                  "// Send this a second time: it stays 204. Deleting an already",
+                  "// deleted booking is success, not an error."
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bookings", "{{bookingId}}"]
+            }
+          },
+          "response": [
+            {
+              "name": "204 No Content (first and every subsequent call)",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/bookings/{{bookingId}}",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "bookings", "{{bookingId}}"]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "_postman_previewlanguage": "text",
+              "header": [{ "key": "X-Request-Id", "value": "req_mdx8p2k1a3f9c7e2" }],
+              "cookie": [],
+              "body": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Idempotency demo",
+      "description": "Run these in order. They share a pinned key so the replay is observable.",
+      "item": [
+        {
+          "name": "1 — Create with a pinned key",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Pin ONE key for this demo folder, overriding the collection script.",
+                  "const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {",
+                  "  const r = (Math.random() * 16) | 0;",
+                  "  const v = c === 'x' ? r : ((r & 0x3) | 0x8);",
+                  "  return v.toString(16);",
+                  "});",
+                  "pm.collectionVariables.set('replayKey', uuid);",
+                  "// Pin the window too, so request #2 is byte-identical.",
+                  "const start = new Date(Date.now() + 48 * 60 * 60 * 1000);",
+                  "start.setUTCSeconds(0, 0);",
+                  "start.setUTCMinutes(Math.ceil(start.getUTCMinutes() / 5) * 5);",
+                  "pm.collectionVariables.set('startAt', start.toISOString());",
+                  "pm.collectionVariables.set('endAt', new Date(start.getTime() + 60 * 60 * 1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 on first call', () => pm.response.to.have.status(201));",
+                  "pm.test('not a replay', () => pm.expect(pm.response.headers.get('Idempotent-Replay')).to.be.oneOf([null, undefined]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Idempotency-Key", "value": "{{replayKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Grace Hopper\",\n  \"customerEmail\": \"grace@example.com\",\n  \"serviceName\": \"Compiler review\",\n  \"resourceId\": \"lab-2\",\n  \"startAt\": \"{{startAt}}\",\n  \"endAt\": \"{{endAt}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bookings"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2 — Replay: same key, same body",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": { "type": "text/javascript", "exec": ["// Reuse replayKey/startAt/endAt from step 1 — do not regenerate."] }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('replays the original status', () => pm.response.to.have.status(201));",
+                  "pm.test('flagged as a replay', () => pm.expect(pm.response.headers.get('Idempotent-Replay')).to.eql('true'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Idempotency-Key", "value": "{{replayKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Grace Hopper\",\n  \"customerEmail\": \"grace@example.com\",\n  \"serviceName\": \"Compiler review\",\n  \"resourceId\": \"lab-2\",\n  \"startAt\": \"{{startAt}}\",\n  \"endAt\": \"{{endAt}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bookings"]
+            },
+            "description": "Identical to step 1. The stored response comes back verbatim — no second booking is created."
+          },
+          "response": [
+            {
+              "name": "201 replayed",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": { "mode": "raw", "raw": "{}" },
+                "url": { "raw": "{{baseUrl}}/api/bookings", "host": ["{{baseUrl}}"], "path": ["api", "bookings"] }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                { "key": "Content-Type", "value": "application/json; charset=utf-8" },
+                { "key": "Idempotent-Replay", "value": "true" },
+                { "key": "X-Request-Id", "value": "req_mdx8p2k1a3f9c7e3" }
+              ],
+              "cookie": [],
+              "body": "{\n  \"booking\": {\n    \"id\": \"665f1c2a9b1e4d3f2a7c8b01\",\n    \"customerName\": \"Grace Hopper\",\n    \"customerEmail\": \"grace@example.com\",\n    \"serviceName\": \"Compiler review\",\n    \"resourceId\": \"lab-2\",\n    \"startAt\": \"2026-08-01T10:00:00.000Z\",\n    \"endAt\": \"2026-08-01T11:00:00.000Z\",\n    \"notes\": \"\",\n    \"status\": \"pending\",\n    \"version\": 0,\n    \"createdAt\": \"2026-07-27T09:12:44.001Z\",\n    \"updatedAt\": \"2026-07-27T09:12:44.001Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "3 — Reuse: same key, DIFFERENT body",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": { "type": "text/javascript", "exec": ["// Still using replayKey from step 1."] }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409', () => pm.response.to.have.status(409));",
+                  "pm.test('IDEMPOTENCY_KEY_REUSE', () => pm.expect(pm.response.json().error.code).to.eql('IDEMPOTENCY_KEY_REUSE'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Idempotency-Key", "value": "{{replayKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Someone Else\",\n  \"customerEmail\": \"else@example.com\",\n  \"serviceName\": \"Compiler review\",\n  \"resourceId\": \"lab-2\",\n  \"startAt\": \"{{startAt}}\",\n  \"endAt\": \"{{endAt}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bookings"]
+            }
+          },
+          "response": [
+            {
+              "name": "409 IDEMPOTENCY_KEY_REUSE",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": { "mode": "raw", "raw": "{}" },
+                "url": { "raw": "{{baseUrl}}/api/bookings", "host": ["{{baseUrl}}"], "path": ["api", "bookings"] }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"IDEMPOTENCY_KEY_REUSE\",\n    \"message\": \"This Idempotency-Key was already used with a different request body. Generate a new key for a new booking.\",\n    \"requestId\": \"req_mdx8p2k1a3f9c7e4\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Failure modes",
+      "item": [
+        {
+          "name": "400 — validation error",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.response.to.have.status(400));",
+                  "pm.test('VALIDATION_ERROR with details', () => {",
+                  "  const e = pm.response.json().error;",
+                  "  pm.expect(e.code).to.eql('VALIDATION_ERROR');",
+                  "  pm.expect(e.details).to.be.an('array').that.is.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"\",\n  \"customerEmail\": \"not-an-email\",\n  \"serviceName\": \"Design consultation\",\n  \"resourceId\": \"room-1\",\n  \"startAt\": \"2020-01-01T10:02:00.000Z\",\n  \"endAt\": \"2020-01-01T09:00:00.000Z\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bookings"]
+            },
+            "description": "Empty name, malformed email, a start in the past that is also off the 5-minute grid, and an end before the start."
+          },
+          "response": [
+            {
+              "name": "400 VALIDATION_ERROR",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": { "mode": "raw", "raw": "{}" },
+                "url": { "raw": "{{baseUrl}}/api/bookings", "host": ["{{baseUrl}}"], "path": ["api", "bookings"] }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"VALIDATION_ERROR\",\n    \"message\": \"The request failed validation.\",\n    \"details\": [\n      { \"path\": \"body.customerName\", \"message\": \"Customer name is required\" },\n      { \"path\": \"body.customerEmail\", \"message\": \"Enter a valid email address\" },\n      { \"path\": \"body.startAt\", \"message\": \"Start must fall on a 5-minute boundary\" },\n      { \"path\": \"body.endAt\", \"message\": \"End must be after start\" },\n      { \"path\": \"body.startAt\", \"message\": \"Must be in the future\" }\n    ],\n    \"requestId\": \"req_mdx8p2k1a3f9c7e5\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "400 — missing Idempotency-Key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.response.to.have.status(400));",
+                  "pm.test('points at the header', () => pm.expect(pm.response.json().error.details[0].path).to.eql('headers.Idempotency-Key'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Ada Lovelace\",\n  \"customerEmail\": \"ada@example.com\",\n  \"serviceName\": \"Design consultation\",\n  \"resourceId\": \"{{resourceId}}\",\n  \"startAt\": \"{{startAt}}\",\n  \"endAt\": \"{{endAt}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bookings"]
+            },
+            "description": "The `Idempotency-Key` header is required on POST."
+          },
+          "response": []
+        },
+        {
+          "name": "409 — booking conflict (double-booking)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 BOOKING_CONFLICT', () => {",
+                  "  pm.response.to.have.status(409);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('BOOKING_CONFLICT');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Second Customer\",\n  \"customerEmail\": \"second@example.com\",\n  \"serviceName\": \"Overlapping session\",\n  \"resourceId\": \"{{resourceId}}\",\n  \"startAt\": \"{{startAt}}\",\n  \"endAt\": \"{{endAt}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bookings"]
+            },
+            "description": "Run **Bookings → Create booking** first, then send this: it targets the same resource and window, which the unique slot index rejects."
+          },
+          "response": [
+            {
+              "name": "409 BOOKING_CONFLICT",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": { "mode": "raw", "raw": "{}" },
+                "url": { "raw": "{{baseUrl}}/api/bookings", "host": ["{{baseUrl}}"], "path": ["api", "bookings"] }
+              },
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"BOOKING_CONFLICT\",\n    \"message\": \"That resource is already booked for part of this time range.\",\n    \"requestId\": \"req_mdx8p2k1a3f9c7e6\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "409 — stale resource (bad If-Match)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 STALE_RESOURCE', () => {",
+                  "  pm.response.to.have.status(409);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('STALE_RESOURCE');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "If-Match", "value": "9999" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"notes\": \"Written against a stale version\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bookings", "{{bookingId}}"]
+            },
+            "description": "Version 9999 will never match, so the write is refused instead of silently overwriting someone else's change."
+          },
+          "response": []
+        },
+        {
+          "name": "404 — booking not found",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 NOT_FOUND', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings/507f1f77bcf86cd799439011",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bookings", "507f1f77bcf86cd799439011"]
+            },
+            "description": "A well-formed ObjectId that does not exist in this tenant."
+          },
+          "response": [
+            {
+              "name": "404 NOT_FOUND",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/bookings/507f1f77bcf86cd799439011",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "bookings", "507f1f77bcf86cd799439011"]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "cookie": [],
+              "body": "{\n  \"error\": {\n    \"code\": \"NOT_FOUND\",\n    \"message\": \"Booking not found.\",\n    \"requestId\": \"req_mdx8p2k1a3f9c7e7\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "401 — no credentials",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 UNAUTHORIZED', () => {",
+                  "  pm.response.to.have.status(401);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('UNAUTHORIZED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Cookie", "value": "" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "bookings"]
+            },
+            "description": "Clear the Postman cookie jar for this domain first, otherwise the stored access_token is sent automatically."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

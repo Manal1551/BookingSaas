@@ -34,6 +34,42 @@
   }
 }
 
+/* FullCalendar theming — align its buttons/accents with the brand palette. */
+.fc {
+  --fc-button-bg-color: #4f46e5;
+  --fc-button-border-color: #4f46e5;
+  --fc-button-hover-bg-color: #4338ca;
+  --fc-button-hover-border-color: #4338ca;
+  --fc-button-active-bg-color: #4338ca;
+  --fc-button-active-border-color: #4338ca;
+  --fc-today-bg-color: #eef2ff;
+  --fc-border-color: #e2e8f0;
+  --fc-page-bg-color: #ffffff;
+  font-size: 0.875rem;
+}
+.fc .fc-button {
+  text-transform: capitalize;
+  font-weight: 600;
+  box-shadow: none !important;
+}
+.fc .fc-toolbar-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+.fc .fc-event {
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+/* Stack the toolbar on small screens so it never overflows horizontally. */
+@media (max-width: 640px) {
+  .fc .fc-toolbar.fc-header-toolbar {
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: stretch;
+  }
+}
+
 @layer utilities {
   .text-gradient {
     @apply bg-gradient-to-r from-brand-600 via-indigo-500 to-violet-500 bg-clip-text text-transparent;

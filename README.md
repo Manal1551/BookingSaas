@@ -210,10 +210,27 @@ never `*`.
 | POST | `/api/auth/refresh` | tenant | refresh cookie | Rotate the access token |
 | POST | `/api/auth/logout` | tenant | — | Clear auth cookies |
 | GET | `/api/auth/me` | tenant | access cookie | Current user + tenant |
+| GET | `/api/bookings` | tenant | access cookie | List bookings (`from`/`to`/`status`/`resourceId`/`page`/`limit`/`sort`) |
+| POST | `/api/bookings` | tenant | access cookie | Create a booking — **requires** an `Idempotency-Key` UUID header |
+| GET | `/api/bookings/:id` | tenant | access cookie | Get one booking |
+| PATCH | `/api/bookings/:id` | tenant | access cookie | Partial update — requires `If-Match`/`version` |
+| DELETE | `/api/bookings/:id` | tenant | access cookie | Delete a booking (always `204`, repeatable) |
 
 "tenant" = must be called on a tenant subdomain; "root" = called on the bare
 root domain. Tokens travel in `httpOnly` cookies (a `Bearer` header is also
 accepted for scripts).
+
+> **Error-shape note.** `/api/bookings/*` answers with the richer Week 2
+> envelope `{ error: { code, message, details, requestId } }`; all Week 1
+> routes keep the original `{ error: "message" }` shape. The booking router
+> mounts its own error handler, so Week 1 behaviour is untouched.
+
+**Booking API details** — full request/response shapes, the error-code table,
+idempotency semantics and the double-booking constraint are documented in
+[`server/docs/API.md`](server/docs/API.md). An importable Postman collection
+lives at
+[`server/docs/bookings.postman_collection.json`](server/docs/bookings.postman_collection.json).
+See section 11 for how to run and test everything.
 
 ## 10. Known limitations / next steps
 
@@ -226,15 +243,103 @@ Week 1 deliberately does **not** include:
 - **No password reset / forgot-password flow.**
 - **No billing / plan enforcement** — `plan` is stored but not enforced.
 - **No rate limiting beyond `/api/auth/*`**, and no account lockout.
-- **No automated test suite** — `verify-isolation.js` is a runnable proof, not a
-  CI test harness (Jest/Vitest wiring is a follow-up).
 - **Isolation is application-enforced** — strong only as long as every tenant
   model uses the plugin and no code bypasses it via `skipTenantScope`. A
   DB-per-tenant migration path is the escalation if a customer needs physical
   isolation.
-- **Dashboard sub-pages** (bookings/team/settings) are navigation placeholders.
+- **Bookings** is fully implemented (Week 2): idempotent CRUD API + a
+  responsive FullCalendar UI. **Team/Settings** remain navigation placeholders.
 
-## 11. Troubleshooting
+## 11. Week 2 — bookings: running and testing
+
+### Run it
+
+```bash
+npm install
+npm run docker:up          # Mongo
+npm run seed               # tenants + users (does not create bookings)
+npm run dev                # client + server
+```
+
+Then open **`http://acme.lvh.me:5173/dashboard/bookings`** and log in as
+`alice@acme.test` / `Password123!`.
+
+> The calendar only exists on a **tenant subdomain**. On `localhost` the app
+> serves the marketing page and redirects everything else — that is by design
+> (see section 8), not a bug.
+
+### Test it
+
+| Command | What it covers |
+| --- | --- |
+| `npm test` | Everything below, server then client |
+| `npm run test:server` | 54 tests: 32 API integration (real MongoDB, in-memory) + 22 schema unit tests |
+| `npm run test:client` | 7 component tests for the create form (validation + server-error mapping + idempotency-key reuse) |
+| `npm run verify:bookings` | End-to-end proof against your **real** dev database |
+| `npm run build` | Production client build |
+
+`test:server` needs no running database — `mongodb-memory-server` downloads and
+manages its own `mongod` (the first run downloads ~78 MB, later runs are
+instant). `verify:bookings` needs `npm run docker:up` + `npm run seed` first.
+
+> **Running against a database seeded by an earlier schema version?** Mongoose
+> creates missing indexes but never drops obsolete ones, so a database from a
+> pre-Week-2 build can still carry a stale unique `{ tenantId, idempotencyKey }`
+> index on `bookings` that rejects concurrent inserts with `E11000` (surfacing
+> as 500s under load). Run **`npm run sync:indexes`** once to reconcile every
+> collection's indexes with the current schemas. It is safe to re-run and a
+> no-op on an already-current database.
+
+The integration suite proves the parts that are easy to claim and hard to do:
+duplicate POSTs with one key create exactly **one** row and replay a
+byte-identical response; five parallel duplicates still create exactly one;
+a different body on the same key is `409`; overlapping bookings are rejected by
+the database while back-to-back ones are allowed; `DELETE` twice is `204` both
+times; and every Zod rule rejects with the right `details[].path`.
+
+### Design decisions worth knowing
+
+- **Idempotency without transactions.** Standalone Mongo has no multi-document
+  transactions, so atomicity comes from a unique index: the key is inserted as
+  `in_progress` *before* the booking is created, then updated to `completed`
+  with the stored response. A failed attempt deletes its key so a corrected
+  retry can reuse it. Full write-up in `server/docs/API.md` §3.
+- **Double-booking is prevented by the database, not by a check.** Mongo has no
+  range-exclusion constraint, so each booking is expanded into 5-minute grid
+  slots and a **unique partial multikey index** on
+  `{ tenantId, resourceId, slotKeys }` rejects overlaps. Cancelled bookings drop
+  out of the index and release their slots. This is why start/end times must be
+  5-minute aligned.
+- **One set of Zod schemas.** `server/src/validation/booking.schemas.js` is
+  imported by the browser through the `@shared` Vite alias, so the form and the
+  API enforce literally the same rules.
+- **Week 1 is untouched.** No Week 1 server file was modified. Request ids,
+  rate limiting and the new error envelope are all mounted on the bookings
+  router. On the client, `lib/api.js` is untouched and the booking UI uses its
+  own transport (`lib/bookingClient.js`).
+
+### Intentionally not done
+
+- **No TypeScript and no `npm run typecheck`.** The repo is plain JavaScript
+  and the instruction was to leave the existing setup alone, so the brief's
+  "TS strict, no `any`" constraint is not met. New booking code carries JSDoc
+  types instead. Migrating would mean rewriting every Week 1 file.
+- **No ESLint / `npm run lint`.** No config exists anywhere in the repo; adding
+  one would immediately flag Week 1 files. Ask and it can be added scoped to
+  the booking files only.
+- **No cursor pagination** — `page`/`limit` only, which is what the UI uses.
+- **No `Resource` collection.** `resourceId` is a validated free-form string;
+  there is no resource directory, availability calendar or per-resource
+  opening hours.
+- **Idempotency covers `POST` only.** `PATCH` is guarded by optimistic
+  concurrency and `DELETE` is idempotent by construction, so neither needs a key.
+- **Only successful responses are replayable.** A failed attempt releases its
+  key rather than storing the error — a deliberate trade-off, documented in
+  API.md §3.
+- **No E2E browser test.** The calendar, filters and detail drawer are covered
+  by manual verification plus the form's component tests, not Playwright.
+
+## 12. Troubleshooting
 
 **`querySrv ECONNREFUSED _mongodb._tcp.<cluster>.mongodb.net` at startup or seed.**
 A `mongodb+srv://` (Atlas) URI requires a DNS **SRV** lookup. On some setups —

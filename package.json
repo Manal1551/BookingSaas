@@ -12,7 +12,12 @@
     "dev:server": "npm run dev --workspace server",
     "dev:client": "npm run dev --workspace client",
     "seed": "npm run seed --workspace server",
+    "sync:indexes": "npm run sync:indexes --workspace server",
+    "test": "npm run test:server && npm run test:client",
+    "test:server": "npm run test --workspace server",
+    "test:client": "npm run test --workspace client",
     "verify:isolation": "npm run verify:isolation --workspace server",
+    "verify:bookings": "npm run verify:bookings --workspace server",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "build": "npm run build --workspace client"

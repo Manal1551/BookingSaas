@@ -8,6 +8,7 @@ import { env } from './config/env.js';
 import { buildOriginMatcher } from './utils/corsOrigin.js';
 import authRoutes from './routes/auth.routes.js';
 import tenantRoutes from './routes/tenant.routes.js';
+import bookingRoutes from './routes/booking.routes.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 
 export function createApp() {
@@ -41,6 +42,7 @@ export function createApp() {
   app.use('/api/tenants', tenantRoutes);
   // Auth lives on tenant subdomains (resolveTenant is applied inside).
   app.use('/api/auth', authLimiter, authRoutes);
+  app.use('/api/bookings', bookingRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

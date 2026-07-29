@@ -15,6 +15,7 @@
 import http from 'node:http';
 import { connectDb, disconnectDb } from '../src/config/db.js';
 import { createApp } from '../src/app.js';
+import { env } from '../src/config/env.js';
 import { Tenant } from '../src/models/Tenant.js';
 import { User } from '../src/models/User.js';
 import { runWithTenant } from '../src/utils/tenantContext.js';
@@ -85,8 +86,10 @@ async function run() {
     const s = app.listen(PORT, () => resolve(s));
   });
 
-  const ACME = 'acme.app.local';
-  const GLOBEX = 'globex.app.local';
+  // Build hosts from the configured ROOT_DOMAIN (e.g. lvh.me or app.local) so
+  // resolveTenant extracts the slug correctly regardless of environment.
+  const ACME = `acme.${env.ROOT_DOMAIN}`;
+  const GLOBEX = `globex.${env.ROOT_DOMAIN}`;
   const PASSWORD = 'Password123!';
 
   try {
