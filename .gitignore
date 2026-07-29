@@ -23,5 +23,8 @@ npm-debug.log*
 .vscode/
 .idea/
 
+# Claude Code local settings (machine-specific; shared config lives in settings.json)
+.claude/settings.local.json
+
 # Docker volume data (if bind-mounted locally)
 mongo-data/
