@@ -33,9 +33,68 @@ const envSchema = z.object({
     .string()
     .min(1)
     .default('http://*.app.local:5173'),
+
+  // --- Week 3: Stripe billing -------------------------------------------
+  // Every Stripe var is OPTIONAL on purpose. The app must still boot (and the
+  // Week 1/2 test suites must still run) on a machine with no Stripe account;
+  // `isBillingConfigured()` gates the billing routes at request time instead of
+  // failing the whole process at import time.
+  STRIPE_SECRET_KEY: z
+    .string()
+    .min(1)
+    .refine(
+      (v) => v.startsWith('sk_') || v.startsWith('rk_'),
+      'STRIPE_SECRET_KEY must be a Stripe secret or restricted key (sk_/rk_)'
+    )
+    .optional(),
+  STRIPE_WEBHOOK_SECRET: z
+    .string()
+    .min(1)
+    .refine(
+      (v) => v.startsWith('whsec_'),
+      'STRIPE_WEBHOOK_SECRET must start with whsec_'
+    )
+    .optional(),
+
+  // Price IDs, one per plan/interval cell of the pricing table. A plan whose
+  // price ID is absent is served as "unavailable" rather than 500ing at
+  // checkout.
+  STRIPE_PRICE_PRO_MONTHLY: z.string().min(1).optional(),
+  STRIPE_PRICE_PRO_YEARLY: z.string().min(1).optional(),
+  STRIPE_PRICE_BUSINESS_MONTHLY: z.string().min(1).optional(),
+  STRIPE_PRICE_BUSINESS_YEARLY: z.string().min(1).optional(),
+
+  // Where Checkout returns the browser. `{slug}` is substituted with the
+  // tenant's subdomain so each tenant lands back on its own workspace.
+  BILLING_RETURN_URL: z
+    .string()
+    .min(1)
+    .default('http://{slug}.app.local:5173/dashboard/billing'),
+
+  // Reject webhook events whose signature timestamp is older than this, so a
+  // captured request cannot be replayed days later.
+  STRIPE_WEBHOOK_TOLERANCE_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(300),
 });
 
-const parsed = envSchema.safeParse(process.env);
+/**
+ * `FOO=` in a .env file yields an empty string, not `undefined` — which would
+ * fail the optional Stripe vars' `.min(1)` and hard-stop the process on a
+ * machine that simply has no Stripe account yet. Treat blank as absent.
+ */
+function withoutBlanks(source) {
+  const out = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value === 'string' && value.trim() === '') continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+const parsed = envSchema.safeParse(withoutBlanks(process.env));
 
 if (!parsed.success) {
   const issues = parsed.error.issues

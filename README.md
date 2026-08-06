@@ -1,13 +1,43 @@
-# Multi-Tenant SaaS Starter (MERN) — Week 1
-//
+# Multi-Tenant Booking SaaS (MERN) — Weeks 1–3
+
+A production-shaped multi-tenant SaaS on the MERN stack: **tenancy and auth**
+(Week 1), a **conflict-free booking API and calendar UI** (Week 2), and
+**Stripe subscription billing** (Week 3).
+
 ## 1. Overview
 
-A production-shaped starter for a multi-tenant SaaS built on the MERN stack
-(MongoDB, Express, React, Node). Each customer ("tenant") gets its own
-subdomain (`acme.app.local`), and every piece of tenant data is isolated at the
-**document level** — enforced in the application layer, not left to convention.
-Week 1 delivers tenancy, subdomain routing, JWT auth with per-tenant token
-binding, a seeded database, and a responsive dashboard shell.
+Each customer ("tenant") gets its own subdomain (`acme.lvh.me`), and every
+piece of tenant data is isolated at the **document level** — enforced in the
+application layer, not left to convention.
+
+| Week | Delivers |
+|---|---|
+| **1** | Shared-collection tenancy, subdomain routing, JWT auth with per-tenant token binding, seeded database, dashboard shell |
+| **2** | Booking API with idempotent creates, DB-level double-booking prevention, optimistic concurrency, typed error envelope, calendar UI |
+| **3** | Stripe subscriptions, signature-verified webhooks with duplicate + out-of-order handling, pricing page, Checkout flow, billing history, plan upgrade/downgrade, plan-limit enforcement |
+
+Each week is **additive**: Week 2 mounts its own middleware stack on
+`/api/bookings/*` and Week 3 on `/api/billing/*`, so Week 1's routes keep their
+original behaviour and response shapes untouched. That constraint is visible in
+the code (per-router error handlers rather than one global one) and is verified
+by the test suite — Week 2's 54 tests still pass unchanged.
+
+**Current state:** 120 server tests + 24 client tests passing, client builds
+clean. Billing is fully implemented but ships with Stripe keys blank; see
+section 12 to switch it on.
+
+## Quick start
+
+```bash
+npm install
+npm run sync:indexes     # build DB indexes (required once after pulling Week 3)
+npm run seed             # 3 tenants + users
+npm run dev              # client + server
+```
+
+Open **`http://acme.lvh.me:5173/dashboard`**, log in as `alice@acme.test` /
+`Password123!`. `lvh.me` resolves to `127.0.0.1` automatically — no hosts-file
+edit needed. Full detail in section 5; Stripe setup in section 12.
 
 ## 2. Approach — why shared-collection tenancy
 
@@ -52,36 +82,96 @@ as the plugin, which is why `verify-isolation.js` exists to prove it.
 | zod | Env + input validation | Fail-fast config, validated request bodies |
 | helmet, express-rate-limit, CORS | Security | Headers, brute-force limits, locked origins |
 | Docker Compose | Local dev DB | One-command Mongo + mongo-express UI |
+| **Stripe** (SDK v22) | Payments (Week 3) | Hosted Checkout keeps card data off our servers (PCI SAQ-A); Billing Portal replaces a bespoke payment-method UI |
+| **TanStack Query** | Server state (Weeks 2–3) | Cache invalidation + polling, which is what makes webhook-driven UI updates work |
+| **react-hook-form** | Forms (Week 2) | Uncontrolled inputs, and maps server `details[]` back onto fields |
+| **FullCalendar** | Booking calendar (Week 2) | Month/week/day views without building a date grid |
+| **node:test + supertest** | Server tests | Zero extra runtime deps; real HTTP against a real in-memory Mongo |
+| **Vitest + Testing Library** | Client tests | Shares the Vite config, so tests resolve the same shared schemas |
 
 ## 4. Folder structure
 
+Files are marked `¹` `²` `³` by the week that introduced them.
+
 ```
 /
-├── package.json              # workspaces + concurrently scripts
-├── docker-compose.yml        # mongo + mongo-express (local dev)
-├── README.md
+├── package.json                    # workspaces + scripts
+├── docker-compose.yml              # mongo + mongo-express (local dev)
+├── README.md                       # this file
 ├── server/
 │   ├── .env.example
-│   ├── src/
-│   │   ├── config/           # env.js (zod validation), db.js
-│   │   ├── models/           # Tenant.js, User.js
-│   │   ├── middleware/       # resolveTenant, requireAuth, tenantScopePlugin, errorHandler
-│   │   ├── routes/           # auth.routes.js, tenant.routes.js
-│   │   ├── controllers/      # auth.controller.js, tenant.controller.js
-│   │   ├── utils/            # tenantContext (AsyncLocalStorage), tokens, corsOrigin, httpError
-│   │   ├── app.js            # express app wiring (helmet/cors/rate-limit)
-│   │   └── server.js         # boot: connect DB + listen
-│   └── scripts/
-│       ├── seed.js            # 3 tenants, realistic users, idempotent
-│       └── verify-isolation.js# proves cross-tenant access is rejected
+│   ├── docs/
+│   │   ├── API.md                  # ² Booking API reference
+│   │   ├── BILLING.md              # ³ Billing + webhook reference
+│   │   └── bookings.postman_collection.json   # ²
+│   ├── scripts/
+│   │   ├── seed.js                 # ¹ 3 tenants + users, idempotent
+│   │   ├── verify-isolation.js     # ¹ proves cross-tenant access is rejected
+│   │   ├── verify-bookings.js      # ² proves idempotency + overlap guards
+│   │   ├── sync-indexes.js         # ² reconciles indexes, drops stale ones
+│   │   └── setup-stripe-prices.js  # ³ creates Stripe products/prices
+│   ├── tests/
+│   │   ├── booking.validation.test.js   # ²
+│   │   ├── bookings.integration.test.js # ² 54 tests
+│   │   ├── billing.webhook.test.js      # ³ 26 — real signature verification
+│   │   ├── billing.api.test.js          # ³ 22 — runs with NO Stripe keys
+│   │   └── billing.limits.test.js       # ³ 18 — plan enforcement
+│   └── src/
+│       ├── config/
+│       │   ├── env.js              # ¹ zod-validated env, fails fast
+│       │   ├── db.js               # ¹ connection (+ SRV DNS workaround)
+│       │   └── plans.js            # ³ THE pricing catalog
+│       ├── models/
+│       │   ├── Tenant.js           # ¹ (+³ plan, stripeCustomerId)
+│       │   ├── User.js             # ¹
+│       │   ├── Booking.js          # ² slotKeys + unique overlap index
+│       │   ├── IdempotencyKey.js   # ² two-phase idempotency ledger
+│       │   ├── Subscription.js     # ³ local mirror of Stripe
+│       │   ├── Invoice.js          # ³ billing history
+│       │   └── WebhookEvent.js     # ³ dedupe ledger (NOT tenant-scoped)
+│       ├── middleware/
+│       │   ├── resolveTenant.js    # ¹ subdomain -> tenant + ALS context
+│       │   ├── requireAuth.js      # ¹ JWT + tenant cross-check
+│       │   ├── tenantScopePlugin.js# ¹ document-level isolation
+│       │   ├── errorHandler.js     # ¹ flat { error: "msg" }
+│       │   ├── validate.js         # ² zod wrapper
+│       │   ├── requestId.js        # ² X-Request-Id
+│       │   ├── bookingErrorHandler.js # ² typed envelope (reused by ³)
+│       │   └── enforcePlanLimits.js   # ³ plan caps on booking creation
+│       ├── services/
+│       │   ├── idempotency.js      # ² insert-first, unique-index protocol
+│       │   ├── stripe.js           # ³ lazy client + error translation
+│       │   ├── billing.js          # ³ checkout, portal, plan change, cancel
+│       │   ├── billingSync.js      # ³ ONLY writer of billing state
+│       │   ├── webhookEvents.js    # ³ claim/complete/fail an event
+│       │   └── entitlements.js     # ³ usage counting + limit checks
+│       ├── routes/                 # auth¹ tenant¹ booking² billing³ webhook³
+│       ├── controllers/            # auth¹ tenant¹ booking² billing³ webhook³
+│       ├── validation/             # booking.schemas² billing.schemas³
+│       ├── utils/                  # tenantContext¹ tokens¹ appError² slots²
+│       ├── app.js                  # wiring — webhook mounted BEFORE json()
+│       └── server.js               # boot
 └── client/
     ├── .env.example
-    ├── vite.config.js        # host + allowedHosts wildcard
+    ├── vite.config.js              # host + allowedHosts wildcard, @shared alias
     └── src/
-        ├── pages/            # Landing, Login, Register, Dashboard
-        ├── components/       # Sidebar, ProtectedRoute, TenantContext
-        ├── lib/              # api.js, useTenant.js
-        ├── App.jsx           # root-domain vs tenant routing
+        ├── pages/
+        │   ├── Landing.jsx Login.jsx Register.jsx Dashboard.jsx   # ¹
+        │   ├── Bookings.jsx        # ² calendar + list
+        │   ├── Pricing.jsx         # ³ plans + Checkout flow
+        │   └── Billing.jsx         # ³ subscription, usage, invoices
+        ├── components/
+        │   ├── Sidebar ProtectedRoute TenantContext DashboardLayout  # ¹
+        │   ├── BookingForm BookingDetail BookingFilters Modal Toast  # ²
+        │   ├── PlanCard.jsx        # ³ one pricing column + interval toggle
+        │   ├── PlanChangeDialog.jsx# ³ proration quote before confirming
+        │   ├── SubscriptionCard.jsx# ³ status, renewal, cancel/resume
+        │   ├── InvoiceTable.jsx    # ³ history (table / cards)
+        │   ├── UsageMeters.jsx     # ³ consumption vs limits
+        │   └── CheckoutStatusBanner.jsx # ³ the webhook-wait UI
+        ├── hooks/                  # useBookings² useBilling³
+        ├── lib/                    # api¹ bookingClient² bookingApi² billingApi³
+        ├── App.jsx                 # routing
         └── main.jsx
 ```
 
@@ -107,24 +197,64 @@ npm run docker:up
 # 4. Seed realistic data (3 tenants, users)
 npm run seed
 
-# 5. (optional) Prove tenant isolation
+# 5. Build database indexes — REQUIRED once, and after any schema change.
+#    Creates the Week 2 overlap/idempotency indexes and the Week 3 billing
+#    ones, and drops any index the schemas no longer declare.
+npm run sync:indexes
+
+# 6. Seed realistic data (3 tenants, users)
+npm run seed
+
+# 7. (optional) Prove tenant isolation and the booking guarantees
 npm run verify:isolation
+npm run verify:bookings
 
-# 6. Configure local subdomains — see section 8. Quickest: add to hosts file:
-#     127.0.0.1  app.local acme.app.local globex.app.local initech.app.local
+# 8. Configure local subdomains — see section 8.
+#    EASIEST: set ROOT_DOMAIN=lvh.me (server) and VITE_ROOT_DOMAIN=lvh.me
+#    (client). `lvh.me` and every subdomain resolve to 127.0.0.1 already,
+#    so there is nothing to edit in your hosts file.
+#    Otherwise, for app.local, add to your hosts file:
+#      127.0.0.1  app.local acme.app.local globex.app.local initech.app.local
 
-# 7. Run client + server together
+# 9. Run client + server together
 npm run dev
 ```
 
-Then visit:
+Then visit (using `lvh.me`; swap in `app.local` if you configured that):
 
-- Root / signup:   `http://app.local:5173`
-- Acme workspace:  `http://acme.app.local:5173`
+- Root / signup:   `http://lvh.me:5173`
+- Acme workspace:  `http://acme.lvh.me:5173`
+- Bookings:        `http://acme.lvh.me:5173/dashboard/bookings`
+- Plans:           `http://acme.lvh.me:5173/dashboard/plans`
+- Billing:         `http://acme.lvh.me:5173/dashboard/billing`
 - mongo-express:   `http://localhost:8081` (login `admin` / `admin`)
+
+> **Billing is optional.** With the `STRIPE_*` vars blank the app runs
+> normally — the pricing page shows the real catalog read-only and billing
+> commands answer a clean `503`. Section 12 turns it on.
 
 > If a required env var is missing or malformed, the server **exits immediately**
 > with a message listing exactly which var is wrong (see `server/src/config/env.js`).
+> The Stripe vars are the exception: they are optional by design.
+
+### Every script, in one place
+
+Run from the repo root.
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Client + server together (ports 5173 / 5000) |
+| `npm run dev:server` / `dev:client` | One side only |
+| `npm run build` | Production client build |
+| `npm run seed` | 3 tenants + users. Idempotent |
+| `npm run sync:indexes` | Reconcile DB indexes with the schemas. **Run after pulling** |
+| `npm run stripe:setup` | Create Stripe products/prices, print the env lines (Week 3) |
+| `npm test` | Everything — server then client |
+| `npm run test:server` | 120 tests (node:test + supertest + in-memory Mongo) |
+| `npm run test:client` | 24 tests (Vitest + Testing Library) |
+| `npm run verify:isolation` | Proves cross-tenant access is rejected |
+| `npm run verify:bookings` | Proves idempotency + the overlap guard |
+| `npm run docker:up` / `docker:down` | Local Mongo + mongo-express |
 
 ## 6. Seeded test accounts
 
@@ -215,10 +345,26 @@ never `*`.
 | GET | `/api/bookings/:id` | tenant | access cookie | Get one booking |
 | PATCH | `/api/bookings/:id` | tenant | access cookie | Partial update — requires `If-Match`/`version` |
 | DELETE | `/api/bookings/:id` | tenant | access cookie | Delete a booking (always `204`, repeatable) |
+| GET | `/api/billing/plans` | tenant | access cookie | Plan catalog + the tenant's current plan |
+| GET | `/api/billing/subscription` | tenant | access cookie | Current subscription state |
+| GET | `/api/billing/invoices` | tenant | access cookie | Billing history (`page`/`limit`/`status`) |
+| GET | `/api/billing/usage` | tenant | access cookie | Consumption vs. the plan's limits |
+| POST | `/api/billing/checkout` | tenant | owner/admin | Start a Stripe Checkout Session |
+| POST | `/api/billing/portal` | tenant | owner/admin | Open the Stripe Billing Portal |
+| GET | `/api/billing/preview` | tenant | owner/admin | Quote a plan switch (proration) |
+| POST | `/api/billing/change` | tenant | owner/admin | Apply an upgrade/downgrade |
+| POST | `/api/billing/cancel` | tenant | owner/admin | Cancel at period end |
+| POST | `/api/billing/resume` | tenant | owner/admin | Undo a scheduled cancellation |
+| POST | `/api/billing/sync` | tenant | owner/admin | Re-pull billing state from Stripe |
+| POST | `/api/webhooks/stripe` | root | **signature** | Stripe events — verified, deduped, ordered |
 
 "tenant" = must be called on a tenant subdomain; "root" = called on the bare
 root domain. Tokens travel in `httpOnly` cookies (a `Bearer` header is also
 accepted for scripts).
+
+The webhook is the one route with no session and no subdomain: it is
+authenticated solely by its Stripe signature, and is mounted **before**
+`express.json()` so signature verification sees the raw bytes.
 
 > **Error-shape note.** `/api/bookings/*` answers with the richer Week 2
 > envelope `{ error: { code, message, details, requestId } }`; all Week 1
@@ -232,23 +378,36 @@ lives at
 [`server/docs/bookings.postman_collection.json`](server/docs/bookings.postman_collection.json).
 See section 11 for how to run and test everything.
 
+**Billing API details** — plan catalog, proration rules, the webhook security
+model (signature verification, duplicate handling, out-of-order guards) and the
+frontend reconciliation flow are documented in
+[`server/docs/BILLING.md`](server/docs/BILLING.md). See section 12 to run it.
+
 ## 10. Known limitations / next steps
 
-Week 1 deliberately does **not** include:
+Project-wide gaps. Each week also lists its own scope decisions — see
+[§11 *Intentionally not done*](#intentionally-not-done) for bookings and
+[§12](#intentionally-not-done-2) for billing.
 
 - **No email verification** — accounts are usable immediately on register.
 - **No refresh-token revocation store** — logout clears cookies, but a stolen
   refresh token remains valid until it expires. A denylist/rotation store is the
   next step.
 - **No password reset / forgot-password flow.**
-- **No billing / plan enforcement** — `plan` is stored but not enforced.
-- **No rate limiting beyond `/api/auth/*`**, and no account lockout.
+- **No account lockout**, though every router now rate-limits
+  (auth, bookings, billing, and a tighter cap on checkout).
 - **Isolation is application-enforced** — strong only as long as every tenant
   model uses the plugin and no code bypasses it via `skipTenantScope`. A
   DB-per-tenant migration path is the escalation if a customer needs physical
   isolation.
-- **Bookings** is fully implemented (Week 2): idempotent CRUD API + a
-  responsive FullCalendar UI. **Team/Settings** remain navigation placeholders.
+- **Team and Settings remain navigation placeholders.** Roles are enforced
+  server-side (`requireRole`) and seats are capped by plan, but there is no UI
+  to invite or manage members.
+
+**Now done, and previously listed here as missing:** bookings (Week 2 — an
+idempotent CRUD API with DB-level double-booking prevention and a FullCalendar
+UI) and billing (Week 3 — Stripe subscriptions with `Tenant.plan` derived from
+webhooks and enforced on writes).
 
 ## 11. Week 2 — bookings: running and testing
 
@@ -339,7 +498,155 @@ times; and every Zod rule rejects with the right `details[].path`.
 - **No E2E browser test.** The calendar, filters and detail drawer are covered
   by manual verification plus the form's component tests, not Playwright.
 
-## 12. Troubleshooting
+## 12. Week 3 — payments, webhooks & pricing UI
+
+Stripe subscription billing: a plan catalog, hosted Checkout, a signature-
+verified webhook pipeline, and a pricing + billing-history UI that reflects
+webhook-driven changes without a manual refresh.
+
+Full reference: **[`server/docs/BILLING.md`](server/docs/BILLING.md)**.
+
+### Billing is optional
+
+Every Stripe variable in `server/.env.example` is optional. Leave them blank
+and the app boots and runs exactly as before — `/api/billing/*` reads still
+work, commands answer a clean `503 BILLING_NOT_CONFIGURED`, and the pricing
+page renders read-only. Nothing from Week 1 or Week 2 changes either way.
+
+### Turning billing on
+
+**1. Secret key.** From [dashboard.stripe.com/test/apikeys](https://dashboard.stripe.com/test/apikeys)
+(confirm **Test mode** is on) into `server/.env`:
+
+```
+STRIPE_SECRET_KEY=sk_test_...
+```
+
+**2. Prices.** Rather than creating four prices by hand:
+
+```bash
+npm run stripe:setup
+```
+
+This creates the Pro and Business products with monthly + yearly prices,
+reading the amounts from `config/plans.js` so Stripe cannot drift from the
+catalog, and prints the four `STRIPE_PRICE_*` lines to paste into
+`server/.env`. It is safe to re-run — products are looked up by
+`metadata.planId` and a price is only created if no matching one exists — and
+it refuses to run against a live key.
+
+Restart the server. **Checkout now works**: open
+`http://acme.lvh.me:5173/dashboard/plans` and pay with test card
+`4242 4242 4242 4242` (any future expiry, any CVC). Use
+`4000 0000 0000 0002` to watch a decline.
+
+**3. Webhooks (optional for a first test).** Stripe cannot reach `localhost`,
+so events need forwarding:
+
+```bash
+# install once: winget install Stripe.StripeCLI
+stripe login
+stripe listen --forward-to localhost:5000/api/webhooks/stripe
+# paste the printed whsec_... into STRIPE_WEBHOOK_SECRET, restart the server
+```
+
+Leave `stripe listen` running in its own terminal.
+
+**Without it the flow still completes.** The UI detects that no webhook
+arrived and falls back to `POST /api/billing/sync` after 8 seconds, which pulls
+the state straight from Stripe. You see "Payment received — activating your
+plan…" for a few seconds longer, then the plan goes live. That fallback is
+deliberate, not a workaround: it is the same path that repairs a webhook which
+failed every delivery retry in production.
+
+### What was added
+
+| Area | Pieces |
+| --- | --- |
+| Catalog | `config/plans.js` — free / pro / business, monthly + yearly |
+| Models | `Subscription`, `Invoice`, `WebhookEvent`; `Tenant` gains `stripeCustomerId` |
+| Services | `stripe.js`, `billing.js` (commands), `billingSync.js` (Stripe → local), `webhookEvents.js` (dedupe) |
+| Routes | `/api/billing/*` (tenant-scoped, role-guarded), `/api/webhooks/stripe` (public, signed) |
+| Entitlements | `services/entitlements.js` + `middleware/enforcePlanLimits.js` — plan limits actually enforced |
+| UI | `/dashboard/plans`, `/dashboard/billing`, usage meters, plan-change dialog with proration quote |
+
+### Plan limits
+
+| Plan | Bookings/mo | Team | Resources |
+| --- | --- | --- | --- |
+| `free` | 50 | 2 | 1 |
+| `pro` | 2,000 | 15 | 25 |
+| `business` | Unlimited | Unlimited | Unlimited |
+
+Enforced on `POST /api/bookings` and on registering the 2nd+ user, returning
+**402** (`PLAN_LIMIT_EXCEEDED`) — not 403, because the truthful message is
+"upgrade and you may", and the UI shows an upsell rather than a dead end.
+
+**Reads and edits are never blocked.** A tenant over its limit — usually one
+that just downgraded — can still list, edit and cancel everything it has; only
+*creating more* stops. That is what makes a downgrade always safe to apply, and
+it is what `billing.limits.test.js` mostly exists to protect.
+
+Limits are counted from what actually exists, never from a stored counter, so
+there is nothing to drift, double-increment on a retry, or backfill.
+
+> **Upgrade note.** Enabling enforcement means existing tenants — all of them
+> on `free` — are now capped at 1 resource and 50 bookings/month. Move real
+> workspaces onto a paid plan, or raise the free tier in
+> `server/src/config/plans.js`, which is the single place those numbers live.
+
+### Three decisions worth knowing
+
+**The webhook is mounted before `express.json()`.** Stripe signs the exact bytes
+it sent; once the JSON parser consumes the stream those bytes are gone, and any
+re-serialisation fails verification. `app.js` therefore gives the webhook router
+`express.raw()` first. This ordering is load-bearing.
+
+**Duplicate and out-of-order events are both handled, separately.** Stripe
+delivers at-least-once and in no guaranteed order. A unique-index ledger makes
+the *effects* exactly-once; a `lastEventAt` guard inside each write's filter
+makes a late-arriving older event a no-op rather than a plan regression.
+
+**Reads never touch Stripe.** Webhooks maintain a local mirror, so the billing
+page loads at database speed and stays readable when Stripe is slow or down.
+`POST /api/billing/sync` is the explicit repair path when an event is missed.
+
+### Test it
+
+| Command | What it covers |
+| --- | --- |
+| `npm run test:server` | 120 tests — 54 from Week 2, plus 66 for billing & limits |
+| `npm run test:client` | 24 tests — 7 from Week 2, plus 17 for pricing & limits |
+
+`billing.webhook.test.js` uses **real** Stripe signature verification (local
+crypto, no network, nothing mocked away) to cover forged signatures, wrong
+secrets, tampered bodies, expired timestamps, duplicate delivery, out-of-order
+events, unknown prices and cross-tenant isolation.
+`billing.api.test.js` runs with **no Stripe keys at all** and pins that the
+unconfigured path stays clean and Week 1's error shape is untouched.
+
+### Intentionally not done
+
+- **No historical usage.** Meters show the *current* month only; there is no
+  chart of past consumption and no record kept once a month rolls over.
+- **No grace period or soft limit.** Hitting a cap blocks the next create
+  immediately. Real products usually allow a small overage with a warning
+  first; that policy would live in `services/entitlements.js`.
+- **No proactive "you're near your limit" email.** The warning is in the UI
+  (from 80% onward) and nowhere else — this app sends no mail at all.
+- **No tax, VAT or invoice localisation.** `automatic_tax` is off and prices are
+  USD-only.
+- **No trials.** The model mirrors `trial_end` and the UI renders it, but no
+  plan is configured to start one.
+- **No seats or metered pricing.** Every subscription is quantity 1.
+- **No dunning emails.** A failed payment is surfaced in the UI; Stripe's own
+  retry schedule handles the rest, and no mail is sent from this app.
+- **Payment methods are managed in Stripe's Billing Portal**, not rebuilt here
+  — deliberate, since it keeps card data off this server entirely (SAQ-A).
+- **No E2E browser test** of the real Checkout redirect, for the same reason as
+  Week 2: covered by component tests plus manual verification.
+
+## 13. Troubleshooting
 
 **`querySrv ECONNREFUSED _mongodb._tcp.<cluster>.mongodb.net` at startup or seed.**
 A `mongodb+srv://` (Atlas) URI requires a DNS **SRV** lookup. On some setups —
@@ -364,8 +671,19 @@ tenant flow requires the subdomain — start at `http://app.local:5173`.
 
 ### Security measures implemented
 
-helmet · CORS locked to the subdomain pattern (not `*`) · `express-rate-limit`
-on `/api/auth/*` · bcrypt 12 rounds · JWTs in `httpOnly` cookies (not
-localStorage) · separate access/refresh secrets · zod validation on every
-DB-touching body · env validated at boot · no secrets/URIs ever logged or
-returned in responses.
+**Weeks 1–2.** helmet · CORS locked to the subdomain pattern (not `*`) ·
+`express-rate-limit` on `/api/auth/*`, `/api/bookings/*` and `/api/billing/*` ·
+bcrypt 12 rounds · JWTs in `httpOnly` cookies (not localStorage) · separate
+access/refresh secrets · token `tenantId` cross-checked against the subdomain
+on every request · zod validation on every DB-touching body · env validated at
+boot · no secrets/URIs ever logged or returned in responses.
+
+**Week 3 (payments).** Card data never touches this server — hosted Checkout
+keeps the PCI surface at SAQ-A · webhook signatures verified over the **raw**
+body before anything is parsed or logged · a signed payload older than the
+tolerance window is rejected, bounding replay of a captured request · duplicate
+events are made side-effect-free by a unique-index ledger · the client names a
+**plan**, never a price or amount, so it cannot select a $0 price · plan
+mutations require `owner`/`admin` · Stripe errors are translated so provider
+internals and key hints never reach the browser · the webhook body is capped at
+1 MB on an unauthenticated endpoint.

@@ -87,7 +87,13 @@ before(async () => {
   await Booking.init();
   await IdempotencyKey.init();
 
-  tenant = await Tenant.create({ name: 'Acme', slug: 'acme' });
+  // `business` (unlimited) on purpose: Week 3 added plan-limit enforcement to
+  // POST /api/bookings, and these tests are about booking SEMANTICS —
+  // idempotency, overlap, optimistic concurrency — not about entitlements.
+  // Leaving the fixture on the default `free` plan would cap it at one
+  // resource and make half of them fail for a reason they are not testing.
+  // Limit enforcement has its own suite: billing.limits.test.js.
+  tenant = await Tenant.create({ name: 'Acme', slug: 'acme', plan: 'business' });
 
   const { signAccessToken } = await import('../src/utils/tokens.js');
   token = signAccessToken({

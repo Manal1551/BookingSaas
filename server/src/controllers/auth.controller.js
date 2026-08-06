@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import { z } from 'zod';
 import { User } from '../models/User.js';
 import { HttpError, asyncHandler } from '../utils/httpError.js';
+import { checkCanAddUser } from '../services/entitlements.js';
 import {
   signAccessToken,
   signRefreshToken,
@@ -59,6 +60,21 @@ export const register = asyncHandler(async (req, res) => {
   const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
   // First user of a tenant becomes owner; subsequent users are members.
   const isFirst = (await User.countDocuments()) === 0;
+
+  /**
+   * Plan seat limit (Week 3). Checked only for users AFTER the first, so a
+   * brand-new workspace can always create its owner — a tenant that could not
+   * register anyone would be unreachable, and no plan should be able to
+   * produce that. 402 is "upgrade and you may", not 403's "never".
+   *
+   * Deliberately reported in Week 1's flat `{ error: "message" }` shape, which
+   * is what the Register page already parses.
+   */
+  if (!isFirst) {
+    const seat = await checkCanAddUser(tenant.plan);
+    if (!seat.allowed) throw new HttpError(402, seat.message);
+  }
+
   const user = await User.create({
     name,
     email: email.toLowerCase(),

@@ -7,6 +7,8 @@ import Login from './pages/Login.jsx';
 import Register from './pages/Register.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Bookings from './pages/Bookings.jsx';
+import Pricing from './pages/Pricing.jsx';
+import Billing from './pages/Billing.jsx';
 
 /**
  * Routing depends on whether we are on the ROOT domain or a TENANT subdomain:
@@ -45,6 +47,22 @@ export default function App() {
           element={
             <ProtectedRoute>
               <Bookings />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/dashboard/plans"
+          element={
+            <ProtectedRoute>
+              <Pricing />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/dashboard/billing"
+          element={
+            <ProtectedRoute>
+              <Billing />
             </ProtectedRoute>
           }
         />

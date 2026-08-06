@@ -13,6 +13,7 @@
     "dev:client": "npm run dev --workspace client",
     "seed": "npm run seed --workspace server",
     "sync:indexes": "npm run sync:indexes --workspace server",
+    "stripe:setup": "npm run stripe:setup --workspace server",
     "test": "npm run test:server && npm run test:client",
     "test:server": "npm run test --workspace server",
     "test:client": "npm run test --workspace client",

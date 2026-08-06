@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useRef, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { Link } from 'react-router-dom';
 
 import Modal from './Modal.jsx';
 import {
@@ -11,6 +12,7 @@ import {
   MAX_NOTES_LENGTH,
 } from '@shared/booking.schemas.js';
 import { bookingApi, changedFields, describeError, ERROR_CODES } from '../lib/bookingApi.js';
+import { BILLING_ERROR_CODES } from '../lib/billingApi.js';
 import { useCreateBooking, useUpdateBooking } from '../hooks/useBookings.js';
 import { toDatetimeLocal, fromDatetimeLocal } from '../lib/datetime.js';
 
@@ -138,6 +140,21 @@ export default function BookingForm({ mode = 'create', booking, onClose, onSaved
       return;
     }
 
+    if (code === BILLING_ERROR_CODES.PLAN_LIMIT_EXCEEDED) {
+      /**
+       * Not a mistake by the user — the form is valid and resubmitting it
+       * unchanged will fail identically. So it is rendered as an upsell with a
+       * way forward rather than a validation error, and the idempotency key is
+       * kept: after upgrading, the very same submission should go through.
+       */
+      const fields = err.fieldErrors?.() ?? {};
+      if (fields.resourceId) {
+        setError('resourceId', { type: 'server', message: fields.resourceId });
+      }
+      setFormError({ message, requestId, upgrade: true });
+      return;
+    }
+
     if (code === ERROR_CODES.BOOKING_CONFLICT) {
       setError('startAt', { type: 'server', message: 'This time overlaps an existing booking' });
       setFormError({ message, requestId });
@@ -252,10 +269,33 @@ export default function BookingForm({ mode = 'create', booking, onClose, onSaved
         </div>
 
         {formError && (
-          <div role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <div
+            role="alert"
+            className={[
+              'rounded-lg px-3 py-2 text-sm',
+              // Amber, not red: hitting a plan limit is a state to resolve, not
+              // a mistake to correct.
+              formError.upgrade
+                ? 'bg-amber-50 text-amber-900'
+                : 'bg-red-50 text-red-700',
+            ].join(' ')}
+          >
             <p>{formError.message}</p>
+            {formError.upgrade && (
+              <Link
+                to="/dashboard/plans"
+                className="mt-2 inline-flex font-semibold underline underline-offset-2"
+              >
+                View plans
+              </Link>
+            )}
             {formError.requestId && (
-              <p className="mt-1 font-mono text-xs text-red-500">
+              <p
+                className={[
+                  'mt-1 font-mono text-xs',
+                  formError.upgrade ? 'text-amber-600' : 'text-red-500',
+                ].join(' ')}
+              >
                 Reference: {formError.requestId}
               </p>
             )}

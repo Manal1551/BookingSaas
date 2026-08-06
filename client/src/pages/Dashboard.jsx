@@ -26,15 +26,33 @@ export default function Dashboard() {
         <StatCard label="Plan" value={tenant?.plan} />
       </div>
 
-      <div className="mt-8 card">
-        <h2 className="font-semibold text-slate-800">Bookings</h2>
-        <p className="mt-2 text-sm text-slate-500">
-          Manage appointments on the calendar — create, edit, and cancel
-          bookings, all scoped to this tenant.
-        </p>
-        <Link to="/dashboard/bookings" className="btn-primary mt-4 inline-flex">
-          Open bookings
-        </Link>
+      <div className="mt-8 grid gap-4 lg:grid-cols-2">
+        <div className="card">
+          <h2 className="font-semibold text-slate-800">Bookings</h2>
+          <p className="mt-2 text-sm text-slate-500">
+            Manage appointments on the calendar — create, edit, and cancel
+            bookings, all scoped to this tenant.
+          </p>
+          <Link to="/dashboard/bookings" className="btn-primary mt-4 inline-flex">
+            Open bookings
+          </Link>
+        </div>
+
+        <div className="card">
+          <h2 className="font-semibold text-slate-800">Subscription</h2>
+          <p className="mt-2 text-sm text-slate-500">
+            You are on the <strong className="capitalize">{tenant?.plan}</strong>{' '}
+            plan. Compare plans, or review invoices and payment details.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link to="/dashboard/plans" className="btn-primary inline-flex">
+              {tenant?.plan === 'free' ? 'Upgrade' : 'Change plan'}
+            </Link>
+            <Link to="/dashboard/billing" className="btn-ghost inline-flex">
+              Billing history
+            </Link>
+          </div>
+        </div>
       </div>
 
       <p className="mt-8 text-center text-xs text-slate-400">

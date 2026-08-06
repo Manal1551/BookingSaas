@@ -15,7 +15,9 @@
 /**
  * @typedef {'VALIDATION_ERROR'|'UNAUTHORIZED'|'FORBIDDEN'|'NOT_FOUND'
  *   |'BOOKING_CONFLICT'|'IDEMPOTENCY_KEY_REUSE'|'REQUEST_IN_PROGRESS'
- *   |'STALE_RESOURCE'|'RATE_LIMITED'|'INTERNAL_ERROR'} ErrorCode
+ *   |'STALE_RESOURCE'|'RATE_LIMITED'|'INTERNAL_ERROR'
+ *   |'BILLING_NOT_CONFIGURED'|'PLAN_UNAVAILABLE'|'NO_SUBSCRIPTION'
+ *   |'PLAN_UNCHANGED'|'STRIPE_ERROR'|'PLAN_LIMIT_EXCEEDED'} ErrorCode
  */
 
 /** @type {Readonly<Record<ErrorCode, ErrorCode>>} */
@@ -30,6 +32,20 @@ export const ERROR_CODES = Object.freeze({
   STALE_RESOURCE: 'STALE_RESOURCE',
   RATE_LIMITED: 'RATE_LIMITED',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
+
+  // --- Week 3: billing ---------------------------------------------------
+  /** This deployment has no Stripe keys — billing is switched off entirely. */
+  BILLING_NOT_CONFIGURED: 'BILLING_NOT_CONFIGURED',
+  /** The plan/interval exists in the catalog but has no Stripe price wired up. */
+  PLAN_UNAVAILABLE: 'PLAN_UNAVAILABLE',
+  /** An operation that needs an existing subscription found none. */
+  NO_SUBSCRIPTION: 'NO_SUBSCRIPTION',
+  /** Asked to switch to the plan the tenant is already on. */
+  PLAN_UNCHANGED: 'PLAN_UNCHANGED',
+  /** Stripe itself refused or was unreachable. */
+  STRIPE_ERROR: 'STRIPE_ERROR',
+  /** The request is valid but the tenant's plan has no room left for it. */
+  PLAN_LIMIT_EXCEEDED: 'PLAN_LIMIT_EXCEEDED',
 });
 
 /** Central code -> HTTP status map. @type {Readonly<Record<ErrorCode, number>>} */
@@ -44,6 +60,20 @@ export const ERROR_STATUS = Object.freeze({
   STALE_RESOURCE: 409,
   RATE_LIMITED: 429,
   INTERNAL_ERROR: 500,
+
+  // 503: billing is a dependency that is absent/*temporarily* unusable, not a
+  // fault in the caller's request — the client should offer a retry, not a fix.
+  BILLING_NOT_CONFIGURED: 503,
+  PLAN_UNAVAILABLE: 409,
+  NO_SUBSCRIPTION: 404,
+  PLAN_UNCHANGED: 409,
+  STRIPE_ERROR: 502,
+
+  // 402 Payment Required — the one status HTTP reserved for exactly this, and
+  // it is worth using: 403 would say "you may never do this", when the truth
+  // is "upgrade and you may". Clients can branch on it to show an upsell
+  // rather than an access-denied dead end.
+  PLAN_LIMIT_EXCEEDED: 402,
 });
 
 /**

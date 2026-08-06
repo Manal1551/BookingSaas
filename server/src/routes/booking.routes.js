@@ -5,6 +5,7 @@ import { resolveTenant } from '../middleware/resolveTenant.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requestId } from '../middleware/requestId.js';
 import { validate } from '../middleware/validate.js';
+import { enforceBookingLimits } from '../middleware/enforcePlanLimits.js';
 import {
   bookingErrorHandler,
   bookingNotFound,
@@ -55,7 +56,19 @@ router.use(bookingLimiter);
 router.use(resolveTenant, requireAuth);
 
 router.get('/', validate(listBookingsQuerySchema, 'query'), listBookings);
-router.post('/', validate(createBookingInputSchema, 'body'), createBooking);
+/**
+ * The plan check sits AFTER validation and BEFORE the controller, so a
+ * rejected request never reaches `withIdempotency` and therefore never burns
+ * the caller's Idempotency-Key — they can upgrade and retry with the same one.
+ * Creation is the only booking verb that is gated; reading, editing and
+ * cancelling stay available to a tenant that is over its limit.
+ */
+router.post(
+  '/',
+  validate(createBookingInputSchema, 'body'),
+  enforceBookingLimits,
+  createBooking
+);
 
 router.get('/:id', validate(bookingIdParamsSchema, 'params'), getBooking);
 router.patch(

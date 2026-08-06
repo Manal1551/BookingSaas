@@ -23,8 +23,21 @@ import { Booking } from '../src/models/Booking.js';
 import { IdempotencyKey } from '../src/models/IdempotencyKey.js';
 import { User } from '../src/models/User.js';
 import { Tenant } from '../src/models/Tenant.js';
+import { Subscription } from '../src/models/Subscription.js';
+import { Invoice } from '../src/models/Invoice.js';
+import { WebhookEvent } from '../src/models/WebhookEvent.js';
 
-const MODELS = [Booking, IdempotencyKey, User, Tenant];
+const MODELS = [
+  Booking,
+  IdempotencyKey,
+  User,
+  Tenant,
+  // Week 3 billing. Tenant also gains a sparse-unique `stripeCustomerId` index,
+  // which this run creates on an existing database.
+  Subscription,
+  Invoice,
+  WebhookEvent,
+];
 
 async function run() {
   await connectDb();
